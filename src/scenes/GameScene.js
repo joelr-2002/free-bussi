@@ -60,6 +60,24 @@ export default class GameScene extends Phaser.Scene {
     this.jumpSpinTween = null;
     this.baseBody = { width: 40, height: 28, offsetX: 7, offsetY: 6 };
     this.jumpSpinTween = null;
+    
+    // Biome system
+    this.currentBiome = 'desert';
+    this.biomes = ['desert', 'snow', 'moon', 'volcano'];
+    this.biomeChangeScore = 700;
+    this.backgroundLayers = { sky: null, farHills: null, midHills: null };
+    this.biomeText = null;
+    
+    // New boost items
+    this.isSpeedBoosted = false;
+    this.hasDoublePoints = false;
+    this.hasMagnet = false;
+    this.magnetRadius = 150;
+    
+    // Improved terrain
+    this.platforms = null;
+    this.nextPlatformAt = 0;
+    this.decorations = null;
   }
 
   preload() {
@@ -74,6 +92,8 @@ export default class GameScene extends Phaser.Scene {
     this.createPlayer();
     this.createObstacles();
     this.createPowerups();
+    this.createPlatforms();
+    this.createDecorations();
     this.createCamera();
     this.createControls();
     this.addHUD();
@@ -123,6 +143,18 @@ export default class GameScene extends Phaser.Scene {
     this.isSpinning = false;
     this.spinEndAt = 0;
     this.spinCooldownAt = 0;
+    
+    // Reset biome system
+    this.currentBiome = 'desert';
+    this.biomeText = null;
+    
+    // Reset new boost items
+    this.isSpeedBoosted = false;
+    this.hasDoublePoints = false;
+    this.hasMagnet = false;
+    
+    // Reset terrain
+    this.nextPlatformAt = this.time.now + 3000;
   }
 
   update() {
@@ -138,33 +170,39 @@ export default class GameScene extends Phaser.Scene {
     }
     // Core game loop: collect input, apply physics impulses, spawn/cleanup obstacles, then update visuals
     this.updateScore();
+    this.updateBiome();
     this.updateRunnerSpeed();
     this.handlePlayerInput();
     this.spawnObstaclesIfNeeded();
     this.spawnPowerupsIfNeeded();
+    this.spawnPlatformsIfNeeded();
     this.cleanupPowerups();
     this.cleanupObstacles();
+    this.cleanupPlatforms();
     this.updateSpin();
     this.updatePlayerState();
     this.updatePowerRing();
+    this.updateMagnet();
   }
 
   createBackground() {
     // Simple parallax layers using colored rectangles; wide enough to cover camera travel
-    const sky = this.add.rectangle(0, 0, this.levelWidth + this.scale.width * 2, this.scale.height, 0xdaf0ff)
+    const biomeColors = this.getBiomeColors(this.currentBiome);
+    
+    this.backgroundLayers.sky = this.add.rectangle(0, 0, this.levelWidth + this.scale.width * 2, this.scale.height, biomeColors.sky)
       .setOrigin(0, 0)
       .setScrollFactor(0);
-    sky.depth = -3;
+    this.backgroundLayers.sky.depth = -3;
 
-    const farHills = this.add.rectangle(0, this.scale.height - 220, this.levelWidth + this.scale.width * 2, 220, 0xb8d0ff)
+    this.backgroundLayers.farHills = this.add.rectangle(0, this.scale.height - 220, this.levelWidth + this.scale.width * 2, 220, biomeColors.farHills)
       .setOrigin(0, 0)
       .setScrollFactor(0.2);
-    farHills.depth = -2;
+    this.backgroundLayers.farHills.depth = -2;
 
-    const midHills = this.add.rectangle(0, this.scale.height - 170, this.levelWidth + this.scale.width * 2, 170, 0xa2c7ff)
+    this.backgroundLayers.midHills = this.add.rectangle(0, this.scale.height - 170, this.levelWidth + this.scale.width * 2, 170, biomeColors.midHills)
       .setOrigin(0, 0)
       .setScrollFactor(0.35);
-    midHills.depth = -1;
+    this.backgroundLayers.midHills.depth = -1;
   }
 
   createPlaceholderTextures() {
@@ -215,6 +253,31 @@ export default class GameScene extends Phaser.Scene {
     boostGfx.strokeRoundedRect(0, 0, 32, 32, 8);
     boostGfx.generateTexture('power-jump', 32, 32);
     boostGfx.destroy();
+    
+    // New power-ups
+    const speedGfx = this.add.graphics();
+    speedGfx.fillStyle(0xff4757, 1);
+    speedGfx.fillCircle(16, 16, 16);
+    speedGfx.lineStyle(3, 0xc23616);
+    speedGfx.strokeCircle(16, 16, 16);
+    speedGfx.generateTexture('power-speed', 32, 32);
+    speedGfx.destroy();
+    
+    const doubleGfx = this.add.graphics();
+    doubleGfx.fillStyle(0xffa502, 1);
+    doubleGfx.fillStar(16, 16, 5, 16, 8);
+    doubleGfx.lineStyle(3, 0xcc8000);
+    doubleGfx.strokeCircle(16, 16, 14);
+    doubleGfx.generateTexture('power-double', 32, 32);
+    doubleGfx.destroy();
+    
+    const magnetGfx = this.add.graphics();
+    magnetGfx.fillStyle(0xe056fd, 1);
+    magnetGfx.fillRoundedRect(6, 0, 20, 32, 6);
+    magnetGfx.fillStyle(0xb03fc5, 1);
+    magnetGfx.fillRect(10, 12, 12, 8);
+    magnetGfx.generateTexture('power-magnet', 32, 32);
+    magnetGfx.destroy();
 
     // HUD icons (lightweight placeholders)
     const hudJump = this.add.graphics();
@@ -232,6 +295,26 @@ export default class GameScene extends Phaser.Scene {
     hudInv.strokeRoundedRect(0, 0, 24, 24, 8);
     hudInv.generateTexture('hud-power-inv', 24, 24);
     hudInv.destroy();
+    
+    const hudSpeed = this.add.graphics();
+    hudSpeed.fillStyle(0xff4757, 1);
+    hudSpeed.fillCircle(12, 12, 12);
+    hudSpeed.lineStyle(3, 0xc23616);
+    hudSpeed.strokeCircle(12, 12, 12);
+    hudSpeed.generateTexture('hud-power-speed', 24, 24);
+    hudSpeed.destroy();
+    
+    const hudDouble = this.add.graphics();
+    hudDouble.fillStyle(0xffa502, 1);
+    hudDouble.fillStar(12, 12, 5, 12, 6);
+    hudDouble.generateTexture('hud-power-double', 24, 24);
+    hudDouble.destroy();
+    
+    const hudMagnet = this.add.graphics();
+    hudMagnet.fillStyle(0xe056fd, 1);
+    hudMagnet.fillRoundedRect(6, 0, 12, 24, 4);
+    hudMagnet.generateTexture('hud-power-magnet', 24, 24);
+    hudMagnet.destroy();
   }
 
   createWorld() {
@@ -256,6 +339,15 @@ export default class GameScene extends Phaser.Scene {
     this.player.body.setAllowRotation(false);
 
     this.physics.add.collider(this.player, this.ground);
+  }
+  
+  createPlatforms() {
+    this.platforms = this.physics.add.staticGroup();
+    this.physics.add.collider(this.player, this.platforms);
+  }
+  
+  createDecorations() {
+    this.decorations = this.add.group();
   }
 
   createObstacles() {
@@ -320,7 +412,8 @@ export default class GameScene extends Phaser.Scene {
 
   updateScore() {
     if (!this.player) return;
-    const distanceScore = Math.floor(this.player.x * 0.1);
+    const multiplier = this.hasDoublePoints ? 2 : 1;
+    const distanceScore = Math.floor(this.player.x * 0.1 * multiplier);
     if (distanceScore !== this.score) {
       this.score = distanceScore;
       if (this.scoreText) {
@@ -338,8 +431,14 @@ export default class GameScene extends Phaser.Scene {
     // Score still nudges speed but both contributions are capped by maxSpeed
     const scoreBoost = (this.score / 100) * this.scoreSpeedFactor;
     const rampFromTime = difficultyEase * 180; // add up to ~180 units from time ramp
-    const target = this.baseSpeed + rampFromTime + scoreBoost;
-    this.playerSpeed = Phaser.Math.Clamp(target, this.baseSpeed, this.maxSpeed);
+    let target = this.baseSpeed + rampFromTime + scoreBoost;
+    
+    // Apply speed boost multiplier
+    if (this.isSpeedBoosted) {
+      target *= 1.4;
+    }
+    
+    this.playerSpeed = Phaser.Math.Clamp(target, this.baseSpeed, this.maxSpeed * (this.isSpeedBoosted ? 1.4 : 1));
   }
 
   handlePlayerInput() {
@@ -371,6 +470,7 @@ export default class GameScene extends Phaser.Scene {
       this.player.setVelocityY(this.jumpVelocity);
       this.jumpBufferedAt = 0;
       this.playJumpSpin();
+      this.playJumpSound();
     }
 
     // Variable jump height: releasing jump early shortens airtime
@@ -444,11 +544,24 @@ export default class GameScene extends Phaser.Scene {
     const camera = this.cameras.main;
     const spawnX = camera.scrollX + this.scale.width + Phaser.Math.Between(200, 420);
     const spawnY = this.scale.height - Phaser.Math.Between(120, 180); // hover above ground
-    const key = Math.random() < 0.5 ? 'power-invincible' : 'power-jump';
+    
+    const powerTypes = ['power-invincible', 'power-jump', 'power-speed', 'power-double', 'power-magnet'];
+    const key = Phaser.Utils.Array.GetRandom(powerTypes);
+    
     const power = this.powerups.create(spawnX, spawnY, key);
     power.setOrigin(0.5, 0.5);
     power.setImmovable(true);
     power.body.allowGravity = false;
+    
+    // Add floating animation
+    this.tweens.add({
+      targets: power,
+      y: spawnY + 10,
+      duration: 1000,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.InOut'
+    });
   }
 
   cleanupPowerups() {
@@ -532,6 +645,7 @@ export default class GameScene extends Phaser.Scene {
       this.applyStateVisual(this.playerState);
       if (obstacle && obstacle.destroy) obstacle.destroy();
       this.showPowerFeedback('shield-spent');
+      this.playShieldHitSound();
       return;
     }
     this.gameOver = true;
@@ -541,6 +655,7 @@ export default class GameScene extends Phaser.Scene {
     this.player.setTint(0xff5252);
     this.player.setVelocity(0, 0);
     this.player.body.setGravityY(0);
+    this.playDeathSound();
     // Enter a paused state; update() listens for SPACE to call scene.restart() and rebuild the run
     this.showGameOverMessage();
   }
@@ -761,12 +876,25 @@ export default class GameScene extends Phaser.Scene {
     if (key === 'power-invincible') {
       // Invincibility is a single-hit shield; ignore if already active
       if (this.isInvincible) return;
-      this.isJumpBoosted = false; // cancel other power to keep single active
+      this.clearTimedPowers();
       this.activateInvincibility();
     } else if (key === 'power-jump') {
       // Ignore jump boost if shield active
       if (this.isInvincible) return;
+      this.clearTimedPowers();
       this.activateJumpBoost();
+    } else if (key === 'power-speed') {
+      if (this.isInvincible) return;
+      this.clearTimedPowers();
+      this.activateSpeedBoost();
+    } else if (key === 'power-double') {
+      if (this.isInvincible) return;
+      this.clearTimedPowers();
+      this.activateDoublePoints();
+    } else if (key === 'power-magnet') {
+      if (this.isInvincible) return;
+      this.clearTimedPowers();
+      this.activateMagnet();
     }
   }
 
@@ -788,6 +916,9 @@ export default class GameScene extends Phaser.Scene {
   getActiveTint() {
     if (this.isInvincible) return 0xfff066;
     if (this.isJumpBoosted) return 0x7fffd4;
+    if (this.isSpeedBoosted) return 0xff4757;
+    if (this.hasDoublePoints) return 0xffa502;
+    if (this.hasMagnet) return 0xe056fd;
     return 0xffffff;
   }
 
@@ -825,6 +956,9 @@ export default class GameScene extends Phaser.Scene {
   clearPowerups() {
     this.isInvincible = false;
     this.isJumpBoosted = false;
+    this.isSpeedBoosted = false;
+    this.hasDoublePoints = false;
+    this.hasMagnet = false;
     this.jumpVelocity = this.baseJumpVelocity;
     this.applyStateVisual(this.playerState);
     if (this.powerIcon) {
@@ -840,6 +974,14 @@ export default class GameScene extends Phaser.Scene {
     this.activePowerDuration = 0;
     this.activePowerEndsAt = 0;
     this.powerTimer = null;
+  }
+  
+  clearTimedPowers() {
+    this.isJumpBoosted = false;
+    this.isSpeedBoosted = false;
+    this.hasDoublePoints = false;
+    this.hasMagnet = false;
+    this.jumpVelocity = this.baseJumpVelocity;
   }
 
   showPowerFeedback(key) {
@@ -878,6 +1020,18 @@ export default class GameScene extends Phaser.Scene {
       'power-jump': {
         icon: 'hud-power-jump',
         message: 'SUPER SALTO ACTIVADO'
+      },
+      'power-speed': {
+        icon: 'hud-power-speed',
+        message: 'VELOCIDAD AUMENTADA'
+      },
+      'power-double': {
+        icon: 'hud-power-double',
+        message: 'PUNTOS DOBLES'
+      },
+      'power-magnet': {
+        icon: 'hud-power-magnet',
+        message: 'IMÁN ACTIVADO'
       }
     };
     return map[key] || {};
@@ -952,5 +1106,300 @@ export default class GameScene extends Phaser.Scene {
     gain.connect(ctx.destination);
     osc.start(now);
     osc.stop(now + 0.2);
+  }
+  
+  playJumpSound() {
+    const ctx = this.sound.context;
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(400, now);
+    osc.frequency.exponentialRampToValueAtTime(600, now + 0.1);
+    gain.gain.setValueAtTime(0.1, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.15);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.2);
+  }
+  
+  playDeathSound() {
+    const ctx = this.sound.context;
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(300, now);
+    osc.frequency.exponentialRampToValueAtTime(100, now + 0.3);
+    gain.gain.setValueAtTime(0.2, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.3);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.35);
+  }
+  
+  playShieldHitSound() {
+    const ctx = this.sound.context;
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(900, now);
+    osc.frequency.exponentialRampToValueAtTime(1200, now + 0.08);
+    gain.gain.setValueAtTime(0.15, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.1);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.12);
+  }
+  
+  getBiomeColors(biome) {
+    const biomeMap = {
+      desert: {
+        sky: 0xffd89b,
+        farHills: 0xffa751,
+        midHills: 0xff8a3d,
+        ground: 0xe8a87c
+      },
+      snow: {
+        sky: 0xdaf2ff,
+        farHills: 0xb8d9ff,
+        midHills: 0x9cc5ff,
+        ground: 0xe8f4f8
+      },
+      moon: {
+        sky: 0x0a0a20,
+        farHills: 0x1a1a3a,
+        midHills: 0x2a2a4a,
+        ground: 0x4a4a6a
+      },
+      volcano: {
+        sky: 0x2b1b17,
+        farHills: 0x5a2a1a,
+        midHills: 0x8a3a1a,
+        ground: 0x3a3a3a
+      }
+    };
+    return biomeMap[biome] || biomeMap.desert;
+  }
+  
+  updateBiome() {
+    const biomeIndex = Math.floor(this.score / this.biomeChangeScore);
+    const newBiome = this.biomes[biomeIndex % this.biomes.length];
+    
+    if (newBiome !== this.currentBiome) {
+      this.currentBiome = newBiome;
+      this.transitionBiome(newBiome);
+      this.showBiomeMessage(newBiome);
+      this.playBiomeSound();
+    }
+  }
+  
+  transitionBiome(biome) {
+    const colors = this.getBiomeColors(biome);
+    
+    if (this.backgroundLayers.sky) {
+      this.tweens.addCounter({
+        from: 0,
+        to: 1,
+        duration: 1000,
+        onUpdate: (tween) => {
+          const value = tween.getValue();
+          const currentColor = Phaser.Display.Color.ValueToColor(this.backgroundLayers.sky.fillColor);
+          const targetColor = Phaser.Display.Color.ValueToColor(colors.sky);
+          const newColor = Phaser.Display.Color.Interpolate.ColorWithColor(currentColor, targetColor, 1, value);
+          this.backgroundLayers.sky.setFillStyle(Phaser.Display.Color.GetColor(newColor.r, newColor.g, newColor.b));
+        }
+      });
+    }
+    
+    if (this.backgroundLayers.farHills) {
+      this.tweens.addCounter({
+        from: 0,
+        to: 1,
+        duration: 1000,
+        onUpdate: (tween) => {
+          const value = tween.getValue();
+          const currentColor = Phaser.Display.Color.ValueToColor(this.backgroundLayers.farHills.fillColor);
+          const targetColor = Phaser.Display.Color.ValueToColor(colors.farHills);
+          const newColor = Phaser.Display.Color.Interpolate.ColorWithColor(currentColor, targetColor, 1, value);
+          this.backgroundLayers.farHills.setFillStyle(Phaser.Display.Color.GetColor(newColor.r, newColor.g, newColor.b));
+        }
+      });
+    }
+    
+    if (this.backgroundLayers.midHills) {
+      this.tweens.addCounter({
+        from: 0,
+        to: 1,
+        duration: 1000,
+        onUpdate: (tween) => {
+          const value = tween.getValue();
+          const currentColor = Phaser.Display.Color.ValueToColor(this.backgroundLayers.midHills.fillColor);
+          const targetColor = Phaser.Display.Color.ValueToColor(colors.midHills);
+          const newColor = Phaser.Display.Color.Interpolate.ColorWithColor(currentColor, targetColor, 1, value);
+          this.backgroundLayers.midHills.setFillStyle(Phaser.Display.Color.GetColor(newColor.r, newColor.g, newColor.b));
+        }
+      });
+    }
+  }
+  
+  showBiomeMessage(biome) {
+    const biomeNames = {
+      desert: 'DESIERTO',
+      snow: 'NIEVE',
+      moon: 'LUNA',
+      volcano: 'VOLCÁN'
+    };
+    
+    if (this.biomeText) {
+      this.biomeText.destroy();
+    }
+    
+    this.biomeText = this.add.text(this.scale.width / 2, this.scale.height / 2, 
+      `NUEVO BIOMA: ${biomeNames[biome] || biome.toUpperCase()}`, {
+      fontSize: '32px',
+      color: '#ffffff',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 6,
+      align: 'center'
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(15).setAlpha(0);
+    
+    this.tweens.add({
+      targets: this.biomeText,
+      alpha: 1,
+      duration: 300,
+      yoyo: true,
+      hold: 1500,
+      onComplete: () => {
+        if (this.biomeText) {
+          this.biomeText.destroy();
+          this.biomeText = null;
+        }
+      }
+    });
+  }
+  
+  playBiomeSound() {
+    const ctx = this.sound.context;
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    
+    // Play ascending chord
+    [440, 554, 659].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now + i * 0.05);
+      gain.gain.setValueAtTime(0.1, now + i * 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.05 + 0.3);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + i * 0.05);
+      osc.stop(now + i * 0.05 + 0.35);
+    });
+  }
+  
+  activateSpeedBoost() {
+    this.isSpeedBoosted = true;
+    this.activePowerKey = 'power-speed';
+    this.activePowerDuration = 5000;
+    this.activePowerEndsAt = this.time.now + this.activePowerDuration;
+    this.applyStateVisual(this.playerState);
+    this.showPowerFeedback('power-speed');
+    this.playPowerSound();
+    this.schedulePowerClear(5000);
+  }
+  
+  activateDoublePoints() {
+    this.hasDoublePoints = true;
+    this.activePowerKey = 'power-double';
+    this.activePowerDuration = 6000;
+    this.activePowerEndsAt = this.time.now + this.activePowerDuration;
+    this.applyStateVisual(this.playerState);
+    this.showPowerFeedback('power-double');
+    this.playPowerSound();
+    this.schedulePowerClear(6000);
+  }
+  
+  activateMagnet() {
+    this.hasMagnet = true;
+    this.activePowerKey = 'power-magnet';
+    this.activePowerDuration = 7000;
+    this.activePowerEndsAt = this.time.now + this.activePowerDuration;
+    this.applyStateVisual(this.playerState);
+    this.showPowerFeedback('power-magnet');
+    this.playPowerSound();
+    this.schedulePowerClear(7000);
+  }
+  
+  updateMagnet() {
+    if (!this.hasMagnet || !this.player) return;
+    
+    this.powerups.children.iterate((powerup) => {
+      if (!powerup || !powerup.active) return;
+      
+      const distance = Phaser.Math.Distance.Between(
+        this.player.x, this.player.y,
+        powerup.x, powerup.y
+      );
+      
+      if (distance < this.magnetRadius) {
+        const angle = Phaser.Math.Angle.Between(
+          powerup.x, powerup.y,
+          this.player.x, this.player.y
+        );
+        
+        const speed = 400;
+        powerup.x += Math.cos(angle) * speed * (1 / 60);
+        powerup.y += Math.sin(angle) * speed * (1 / 60);
+      }
+    });
+  }
+  
+  spawnPlatformsIfNeeded() {
+    if (this.gameOver || !this.player) return;
+    const now = this.time.now;
+    if (now < this.nextPlatformAt) return;
+    
+    // Spawn platforms occasionally for variety
+    if (Math.random() < 0.3) {
+      this.spawnPlatform();
+    }
+    
+    this.nextPlatformAt = now + Phaser.Math.Between(3000, 6000);
+  }
+  
+  spawnPlatform() {
+    const camera = this.cameras.main;
+    const spawnX = camera.scrollX + this.scale.width + Phaser.Math.Between(100, 300);
+    const groundY = this.scale.height - 40;
+    const platformY = groundY - Phaser.Math.Between(80, 140);
+    const platformWidth = Phaser.Math.Between(100, 200);
+    
+    // Create platform using ground texture repeated
+    const numTiles = Math.ceil(platformWidth / 128);
+    for (let i = 0; i < numTiles; i++) {
+      const tile = this.platforms.create(spawnX + i * 128, platformY, 'ground');
+      tile.setOrigin(0, 0.5);
+      tile.refreshBody();
+    }
+  }
+  
+  cleanupPlatforms() {
+    const cameraLeft = this.cameras.main.scrollX;
+    this.platforms.children.iterate((child) => {
+      if (!child || !child.active) return;
+      if (child.x < cameraLeft - 200) {
+        child.destroy();
+      }
+    });
   }
 }
