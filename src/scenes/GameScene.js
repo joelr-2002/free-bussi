@@ -58,12 +58,11 @@ export default class GameScene extends Phaser.Scene {
     this.spinEndAt = 0;
     this.spinCooldownAt = 0;
     this.jumpSpinTween = null;
-    this.baseBody = { width: 40, height: 28, offsetX: 7, offsetY: 6 };
-    this.jumpSpinTween = null;
-    
+    this.playerScale = 0.16  ; // Base scale for the bus sprite
+
     // Biome system
     this.currentBiome = 'desert';
-    this.biomes = ['desert', 'snow', 'moon', 'volcano'];
+    this.biomes = ['desert', 'snow', 'pradera', 'volcano'];
     this.biomeChangeScore = 700;
     this.backgroundLayers = { sky: null, farHills: null, midHills: null };
     this.biomeText = null;
@@ -81,7 +80,28 @@ export default class GameScene extends Phaser.Scene {
   }
 
   preload() {
-    // Build simple textures at runtime so no external assets are needed
+    // Load biome background images
+    this.load.image('bg-desierto', '/desierto.png');
+    this.load.image('bg-nieve', '/nieve.png');
+    this.load.image('bg-pradera', '/pradera.png');
+    this.load.image('bg-volcan', '/volcan.png');
+
+    // Load bus sprite
+    this.load.image('bus-sprite', '/bus.png');
+
+    // Load biome-specific obstacle sprites
+    this.load.image('obstacle-desert', '/cactus-1.png');
+    this.load.image('obstacle-snow', '/glacial-1.png');
+    this.load.image('obstacle-pradera', '/arbusto-1.png');
+    this.load.image('obstacle-volcano', '/volcanopilar-1.png');
+
+    // Load biome-specific tile sprites
+    this.load.image('tile-desert', '/sand-tile.PNG');
+    this.load.image('tile-snow', '/snow-tile.PNG');
+    this.load.image('tile-pradera', '/grass-tile.PNG');
+    this.load.image('tile-volcano', '/volcano-tile.PNG');
+
+    // Build simple textures at runtime for power-ups
     this.createPlaceholderTextures();
   }
 
@@ -183,59 +203,25 @@ export default class GameScene extends Phaser.Scene {
     this.updatePlayerState();
     this.updatePowerRing();
     this.updateMagnet();
+    this.updateBackgroundParallax();
   }
 
   createBackground() {
-    // Simple parallax layers using colored rectangles; wide enough to cover camera travel
-    const biomeColors = this.getBiomeColors(this.currentBiome);
-    
-    this.backgroundLayers.sky = this.add.rectangle(0, 0, this.levelWidth + this.scale.width * 2, this.scale.height, biomeColors.sky)
-      .setOrigin(0, 0)
-      .setScrollFactor(0);
-    this.backgroundLayers.sky.depth = -3;
+    // Create background using biome images with parallax effect
+    const bgKey = this.getBiomeImageKey(this.currentBiome);
 
-    this.backgroundLayers.farHills = this.add.rectangle(0, this.scale.height - 220, this.levelWidth + this.scale.width * 2, 220, biomeColors.farHills)
+    // Create a tileSprite that covers the screen (images are 2752x1536, game is 960x540)
+    this.backgroundLayers.sky = this.add.tileSprite(0, 0, this.scale.width, this.scale.height, bgKey)
       .setOrigin(0, 0)
-      .setScrollFactor(0.2);
-    this.backgroundLayers.farHills.depth = -2;
+      .setScrollFactor(0)
+      .setDepth(-3);
 
-    this.backgroundLayers.midHills = this.add.rectangle(0, this.scale.height - 170, this.levelWidth + this.scale.width * 2, 170, biomeColors.midHills)
-      .setOrigin(0, 0)
-      .setScrollFactor(0.35);
-    this.backgroundLayers.midHills.depth = -1;
+    // Scale down the background tiles to fit properly (2752x1536 -> 960x540)
+    this.backgroundLayers.sky.setTileScale(0.35, 0.35);
   }
 
   createPlaceholderTextures() {
-    // Bike + rider rectangle with wheels
-    const playerGfx = this.add.graphics();
-    playerGfx.fillStyle(0xff6fa7, 1);
-    playerGfx.fillRoundedRect(0, 0, 54, 34, 8);
-    playerGfx.fillStyle(0xffffff, 1);
-    playerGfx.fillCircle(14, 30, 8);
-    playerGfx.fillCircle(40, 30, 8);
-    playerGfx.generateTexture('player-bike', 54, 38);
-    playerGfx.destroy();
-
-    // Low obstacle block
-    const obstacleGfx = this.add.graphics();
-    obstacleGfx.fillStyle(0x5c7aff, 1);
-    obstacleGfx.fillRoundedRect(0, 0, 46, 46, 6);
-    obstacleGfx.generateTexture('obstacle', 46, 46);
-    obstacleGfx.destroy();
-
-    // High obstacle for future slide mechanic
-    const obstacleHighGfx = this.add.graphics();
-    obstacleHighGfx.fillStyle(0x334d8c, 1);
-    obstacleHighGfx.fillRoundedRect(0, 0, 46, 90, 6);
-    obstacleHighGfx.generateTexture('obstacle-high', 46, 90);
-    obstacleHighGfx.destroy();
-
-    // Ground patch
-    const groundGfx = this.add.graphics();
-    groundGfx.fillStyle(0x8dd16a, 1);
-    groundGfx.fillRect(0, 0, 128, 32);
-    groundGfx.generateTexture('ground', 128, 32);
-    groundGfx.destroy();
+    // Note: Bus sprite, obstacle sprites, and tile sprites are loaded from /public in preload()
 
     // Power-ups
     const invGfx = this.add.graphics();
@@ -265,7 +251,9 @@ export default class GameScene extends Phaser.Scene {
     
     const doubleGfx = this.add.graphics();
     doubleGfx.fillStyle(0xffa502, 1);
-    doubleGfx.fillStar(16, 16, 5, 16, 8);
+    // Create a star shape manually
+    const starPoints = this.createStarPoints(16, 16, 5, 14, 7);
+    doubleGfx.fillPoints(starPoints, true);
     doubleGfx.lineStyle(3, 0xcc8000);
     doubleGfx.strokeCircle(16, 16, 14);
     doubleGfx.generateTexture('power-double', 32, 32);
@@ -306,7 +294,9 @@ export default class GameScene extends Phaser.Scene {
     
     const hudDouble = this.add.graphics();
     hudDouble.fillStyle(0xffa502, 1);
-    hudDouble.fillStar(12, 12, 5, 12, 6);
+    // Create a star shape manually
+    const hudStarPoints = this.createStarPoints(12, 12, 5, 10, 5);
+    hudDouble.fillPoints(hudStarPoints, true);
     hudDouble.generateTexture('hud-power-double', 24, 24);
     hudDouble.destroy();
     
@@ -317,12 +307,34 @@ export default class GameScene extends Phaser.Scene {
     hudMagnet.destroy();
   }
 
+  createStarPoints(cx, cy, spikes, outerRadius, innerRadius) {
+    const points = [];
+    const step = Math.PI / spikes;
+
+    for (let i = 0; i < spikes * 2; i++) {
+      const radius = i % 2 === 0 ? outerRadius : innerRadius;
+      const angle = i * step - Math.PI / 2;
+      points.push({
+        x: cx + Math.cos(angle) * radius,
+        y: cy + Math.sin(angle) * radius
+      });
+    }
+
+    return points;
+  }
+
   createWorld() {
     this.ground = this.physics.add.staticGroup();
     const groundY = this.scale.height - 40;
+    const tileKey = this.getBiomeTileKey(this.currentBiome);
+
+    // Tiles are ~1000x1000, scale to 128x128
+    const tileScale = 0.128;
+
     for (let x = 0; x < this.levelWidth; x += 128) {
-      const tile = this.ground.create(x + 64, groundY, 'ground');
+      const tile = this.ground.create(x + 64, groundY, tileKey);
       tile.setOrigin(0.5, 0.5);
+      tile.setScale(tileScale);
       tile.refreshBody();
     }
 
@@ -331,9 +343,18 @@ export default class GameScene extends Phaser.Scene {
   }
 
   createPlayer() {
-    this.player = this.physics.add.sprite(120, this.scale.height - 140, 'player-bike');
+    this.player = this.physics.add.sprite(120, this.scale.height - 140, 'bus-sprite');
+
+    // Scale down the bus sprite significantly (bus.png is 500x245, we want small like original ~54x38)
+    this.player.setScale(this.playerScale);
+
     this.player.setCollideWorldBounds(true);
-    this.player.setSize(this.baseBody.width, this.baseBody.height).setOffset(this.baseBody.offsetX, this.baseBody.offsetY);
+
+    // Set hitbox relative to original image size (then scaled down)
+    // Original image: 500x245, we want the collision box centered on the bus body
+    this.player.setSize(400, 180);  // Smaller hitbox within the sprite
+    this.player.setOffset(50, 50);   // Offset to center it on the bus body
+
     this.player.setDragX(1400);
     this.player.setMaxVelocity(360, 1000);
     this.player.body.setAllowRotation(false);
@@ -517,16 +538,21 @@ export default class GameScene extends Phaser.Scene {
   spawnRandomObstacle() {
     const camera = this.cameras.main;
     const spawnX = camera.scrollX + this.scale.width + Phaser.Math.Between(80, 220);
-    const baseY = this.scale.height - 70;
 
-    // High obstacles unlock after a short time; they will be used for a slide mechanic later.
-    const allowHigh = (this.time.now - this.runStartTime) > 3000;
-    const isHigh = allowHigh && Math.random() < 0.25;
-    const key = isHigh ? 'obstacle-high' : 'obstacle';
-    const obstacle = this.obstacles.create(spawnX, baseY, key);
+    // Ground tiles are at Y = scale.height - 40 with origin (0.5, 0.5) and size 128x128
+    // So the top of the tile is at (scale.height - 40 - 64) = scale.height - 104
+    const groundY = this.scale.height - 40;
+    const tileHeight = 128;
+    const obstacleBaseY = groundY - (tileHeight / 2);
+
+    // Get obstacle sprite based on current biome
+    const obstacleKey = this.getBiomeObstacleKey(this.currentBiome);
+    const obstacle = this.obstacles.create(spawnX, obstacleBaseY, obstacleKey);
     obstacle.setOrigin(0.5, 1);
-    const tintPalette = isHigh ? [0x334d8c, 0x3c5cb5, 0x2e4a96] : [0x5c7aff, 0x6c9dff, 0x4e63ff];
-    obstacle.setTint(Phaser.Utils.Array.GetRandom(tintPalette));
+
+    // Scale down the obstacle sprites (they're ~450x550, we want ~46 height)
+    obstacle.setScale(0.08);
+
     obstacle.refreshBody();
   }
 
@@ -620,7 +646,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   applyRunEffects(onGround, moving) {
-    // Lightweight “animation” using scale/rotation; no external assets or spritesheets
+    // Lightweight "animation" using scale/rotation; no external assets or spritesheets
     if (!this.player) return;
     if (this.isSpinning) return;
     const now = this.time.now;
@@ -628,11 +654,12 @@ export default class GameScene extends Phaser.Scene {
       const bobScaleY = 1 + Math.sin(now * 0.02) * 0.04; // subtle vertical bob
       const leanBase = 5;
       const leanOsc = Math.sin(now * 0.08) * 2; // tiny oscillation to imply wheel spin
-      this.player.setScale(1, bobScaleY);
+      // Use playerScale as base instead of 1
+      this.player.setScale(this.playerScale, this.playerScale * bobScaleY);
       this.player.setAngle(leanBase + leanOsc);
     } else {
       // Reset visuals when idle or in-air (no double-tilt while jumping)
-      this.player.setScale(1, 1);
+      this.player.setScale(this.playerScale, this.playerScale);
     }
   }
 
@@ -1159,34 +1186,34 @@ export default class GameScene extends Phaser.Scene {
     osc.stop(now + 0.12);
   }
   
-  getBiomeColors(biome) {
+  getBiomeImageKey(biome) {
     const biomeMap = {
-      desert: {
-        sky: 0xffd89b,
-        farHills: 0xffa751,
-        midHills: 0xff8a3d,
-        ground: 0xe8a87c
-      },
-      snow: {
-        sky: 0xdaf2ff,
-        farHills: 0xb8d9ff,
-        midHills: 0x9cc5ff,
-        ground: 0xe8f4f8
-      },
-      moon: {
-        sky: 0x0a0a20,
-        farHills: 0x1a1a3a,
-        midHills: 0x2a2a4a,
-        ground: 0x4a4a6a
-      },
-      volcano: {
-        sky: 0x2b1b17,
-        farHills: 0x5a2a1a,
-        midHills: 0x8a3a1a,
-        ground: 0x3a3a3a
-      }
+      desert: 'bg-desierto',
+      snow: 'bg-nieve',
+      pradera: 'bg-pradera',
+      volcano: 'bg-volcan'
     };
-    return biomeMap[biome] || biomeMap.desert;
+    return biomeMap[biome] || 'bg-desierto';
+  }
+
+  getBiomeObstacleKey(biome) {
+    const obstacleMap = {
+      desert: 'obstacle-desert',
+      snow: 'obstacle-snow',
+      pradera: 'obstacle-pradera',
+      volcano: 'obstacle-volcano'
+    };
+    return obstacleMap[biome] || 'obstacle-desert';
+  }
+
+  getBiomeTileKey(biome) {
+    const tileMap = {
+      desert: 'tile-desert',
+      snow: 'tile-snow',
+      pradera: 'tile-pradera',
+      volcano: 'tile-volcano'
+    };
+    return tileMap[biome] || 'tile-desert';
   }
   
   updateBiome() {
@@ -1202,49 +1229,22 @@ export default class GameScene extends Phaser.Scene {
   }
   
   transitionBiome(biome) {
-    const colors = this.getBiomeColors(biome);
-    
+    const bgKey = this.getBiomeImageKey(biome);
+
     if (this.backgroundLayers.sky) {
-      this.tweens.addCounter({
-        from: 0,
-        to: 1,
-        duration: 1000,
-        onUpdate: (tween) => {
-          const value = tween.getValue();
-          const currentColor = Phaser.Display.Color.ValueToColor(this.backgroundLayers.sky.fillColor);
-          const targetColor = Phaser.Display.Color.ValueToColor(colors.sky);
-          const newColor = Phaser.Display.Color.Interpolate.ColorWithColor(currentColor, targetColor, 1, value);
-          this.backgroundLayers.sky.setFillStyle(Phaser.Display.Color.GetColor(newColor.r, newColor.g, newColor.b));
-        }
-      });
-    }
-    
-    if (this.backgroundLayers.farHills) {
-      this.tweens.addCounter({
-        from: 0,
-        to: 1,
-        duration: 1000,
-        onUpdate: (tween) => {
-          const value = tween.getValue();
-          const currentColor = Phaser.Display.Color.ValueToColor(this.backgroundLayers.farHills.fillColor);
-          const targetColor = Phaser.Display.Color.ValueToColor(colors.farHills);
-          const newColor = Phaser.Display.Color.Interpolate.ColorWithColor(currentColor, targetColor, 1, value);
-          this.backgroundLayers.farHills.setFillStyle(Phaser.Display.Color.GetColor(newColor.r, newColor.g, newColor.b));
-        }
-      });
-    }
-    
-    if (this.backgroundLayers.midHills) {
-      this.tweens.addCounter({
-        from: 0,
-        to: 1,
-        duration: 1000,
-        onUpdate: (tween) => {
-          const value = tween.getValue();
-          const currentColor = Phaser.Display.Color.ValueToColor(this.backgroundLayers.midHills.fillColor);
-          const targetColor = Phaser.Display.Color.ValueToColor(colors.midHills);
-          const newColor = Phaser.Display.Color.Interpolate.ColorWithColor(currentColor, targetColor, 1, value);
-          this.backgroundLayers.midHills.setFillStyle(Phaser.Display.Color.GetColor(newColor.r, newColor.g, newColor.b));
+      // Fade out old background
+      this.tweens.add({
+        targets: this.backgroundLayers.sky,
+        alpha: 0,
+        duration: 500,
+        onComplete: () => {
+          // Change texture and fade in
+          this.backgroundLayers.sky.setTexture(bgKey);
+          this.tweens.add({
+            targets: this.backgroundLayers.sky,
+            alpha: 1,
+            duration: 500
+          });
         }
       });
     }
@@ -1254,7 +1254,7 @@ export default class GameScene extends Phaser.Scene {
     const biomeNames = {
       desert: 'DESIERTO',
       snow: 'NIEVE',
-      moon: 'LUNA',
+      pradera: 'PRADERA',
       volcano: 'VOLCÁN'
     };
     
@@ -1363,7 +1363,12 @@ export default class GameScene extends Phaser.Scene {
       }
     });
   }
-  
+
+  updateBackgroundParallax() {
+    // Background is static - no parallax movement
+    // Backgrounds only change when switching biomes
+  }
+
   spawnPlatformsIfNeeded() {
     if (this.gameOver || !this.player) return;
     const now = this.time.now;
@@ -1383,12 +1388,17 @@ export default class GameScene extends Phaser.Scene {
     const groundY = this.scale.height - 40;
     const platformY = groundY - Phaser.Math.Between(80, 140);
     const platformWidth = Phaser.Math.Between(100, 200);
-    
-    // Create platform using ground texture repeated
+
+    // Get tile sprite for current biome
+    const tileKey = this.getBiomeTileKey(this.currentBiome);
+    const tileScale = 0.128;
+
+    // Create platform using biome tile texture repeated
     const numTiles = Math.ceil(platformWidth / 128);
     for (let i = 0; i < numTiles; i++) {
-      const tile = this.platforms.create(spawnX + i * 128, platformY, 'ground');
+      const tile = this.platforms.create(spawnX + i * 128, platformY, tileKey);
       tile.setOrigin(0, 0.5);
+      tile.setScale(tileScale);
       tile.refreshBody();
     }
   }
